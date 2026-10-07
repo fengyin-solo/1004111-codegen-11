@@ -37,6 +37,7 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>除冰结论（共用除冰作业口径）</th>
           <th>当前状态</th>
           <th>可执行动作</th>
         </tr>
@@ -44,6 +45,7 @@
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td class="deicing-cell">{{ deicingMap[String(row['航班号'] ?? '').trim()] ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -58,7 +60,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无航班保障数据，可先登记航班保障</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无航班保障数据，可先登记航班保障</td>
         </tr>
       </tbody>
     </table>
@@ -74,6 +76,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  deicingConclusions,
   downloadEntries,
   listEntries,
   moduleMeta,
@@ -90,6 +93,7 @@ const stats = [{"label": "待保障航班", "value": 0}, {"label": "保障中航
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const deicingMap = ref<Record<string, string>>({})
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -128,6 +132,8 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    // 与除冰作业共用同一份校核/完成结论，本页不另写判定。
+    deicingMap.value = deicingConclusions()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '航班保障列表读取失败'
   }

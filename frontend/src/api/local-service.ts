@@ -1,3 +1,14 @@
+import {
+  buildDeicingCsv,
+  cancelDeicing,
+  confirmDeicing,
+  DEICING_ACTION,
+  DEICING_KEY,
+  deicingConclusionByFlight,
+  migrateDeicingRows,
+  startDeicing,
+  submitDeicingUsage,
+} from '@/domain/deicing'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
@@ -23,13 +34,48 @@ export function filterRows(rows: EntryRow[], filters: Record<string, string>): E
   )
 }
 
+// 除冰存量兼容迁移：每次读取前幂等跑一遍，只在确实补过数据时落盘。
+function ensureDeicingMigrated(): EntryRow[] {
+  const rows = listRows(DEICING_KEY)
+  const result = migrateDeicingRows(rows)
+  if (result.changed) {
+    saveRows(DEICING_KEY, result.rows)
+  }
+  return result.rows
+}
+
 export function listEntries(key: string, filters: Record<string, string> = {}): PageResult {
-  const matched = filterRows(listRows(key), filters)
+  const source = key === DEICING_KEY ? ensureDeicingMigrated() : listRows(key)
+  const matched = filterRows(source, filters)
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+
+  if (key === DEICING_KEY) {
+    const result = (() => {
+      const rows = ensureDeicingMigrated()
+      if (action === DEICING_ACTION.start) {
+        return startDeicing(rows, id)
+      }
+      if (action === DEICING_ACTION.complete) {
+        return confirmDeicing(rows, id)
+      }
+      if (action === DEICING_ACTION.cancel) {
+        return cancelDeicing(rows, id)
+      }
+      return null
+    })()
+    if (!result) {
+      return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
+    }
+    if (result.changed) {
+      saveRows(DEICING_KEY, result.rows)
+    }
+    return { ok: result.ok, message: result.message }
+  }
+
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
@@ -56,19 +102,52 @@ export function runAction(key: string, id: number, action: string): ActionResult
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 
+/** 用量校核台专用：登记实际用量，不改变状态；重复提交同样的值只生效一次。 */
+export function submitDeicingActual(id: number, actual: string): ActionResult {
+  const result = submitDeicingUsage(ensureDeicingMigrated(), id, actual)
+  if (result.changed) {
+    saveRows(DEICING_KEY, result.rows)
+  }
+  return { ok: result.ok, message: result.message }
+}
+
+/** 航班保障台账共用：按航班号取除冰结论，口径来自同一份除冰规则。 */
+export function deicingConclusions(): Record<string, string> {
+  return deicingConclusionByFlight(ensureDeicingMigrated())
+}
+
 export function resetModule(key: string): PageResult {
   resetRows(key)
   return listEntries(key)
 }
 
+function csvCell(value: unknown): string {
+  const text = String(value ?? '')
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
 export function exportEntries(key: string): { filename: string; content: string } {
   const meta = moduleMeta(key)
-  const header = ['编号', ...meta.fields, '当前状态']
-  const lines = [header.join(',')]
-  for (const row of listRows(key)) {
-    lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status].join(','))
+
+  if (key === DEICING_KEY) {
+    return { filename: `${meta.name}-清单.csv`, content: buildDeicingCsv(ensureDeicingMigrated()) }
   }
-  return { filename: `${meta.name}-清单.csv`, content: `\uFEFF${lines.join('\n')}` }
+
+  const withDeicing = key === 'flight_ops'
+  const deicingByFlight = withDeicing ? deicingConclusions() : null
+  const header = ['编号', ...meta.fields, '当前状态']
+  if (withDeicing) {
+    header.splice(header.length - 1, 0, '除冰结论')
+  }
+  const lines = [header.map(csvCell).join(',')]
+  for (const row of listRows(key)) {
+    const cells = [row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status]
+    if (deicingByFlight) {
+      cells.splice(cells.length - 1, 0, deicingByFlight[String(row['航班号'] ?? '').trim()] ?? '—')
+    }
+    lines.push(cells.map(csvCell).join(','))
+  }
+  return { filename: `${meta.name}-清单.csv`, content: '\uFEFF' + lines.join('\n') }
 }
 
 export function downloadEntries(key: string): void {
