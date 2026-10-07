@@ -1,3 +1,4 @@
+import { migrateDeicingRows } from '@/domain/deicing'
 import { SEED_ROWS } from './seed'
 import type { EntryRow } from './types'
 
@@ -8,6 +9,24 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+// 存量数据兼容迁移：目前只有除冰作业需要按新规则（用量校核/完成判定/取消归档）平移。
+function migrate(data: Record<string, EntryRow[]>): Record<string, EntryRow[]> {
+  if (!data.deicing) {
+    return data
+  }
+  const result = migrateDeicingRows(data.deicing)
+  if (!result.changed) {
+    return data
+  }
+  return { ...data, deicing: result.rows }
+}
+
+function persist(data: Record<string, EntryRow[]>): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  }
+}
+
 function readStorage(): Record<string, EntryRow[]> {
   const fallback = clone(SEED_ROWS)
   if (typeof window === 'undefined' || !window.localStorage) {
@@ -15,15 +34,22 @@ function readStorage(): Record<string, EntryRow[]> {
   }
   const raw = window.localStorage.getItem(STORAGE_KEY)
   if (!raw) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
-    return fallback
+    const seeded = migrate(fallback)
+    persist(seeded)
+    return seeded
   }
   try {
     const parsed = JSON.parse(raw) as Record<string, EntryRow[]>
-    return { ...fallback, ...parsed }
+    const merged = { ...fallback, ...parsed }
+    const migrated = migrate(merged)
+    if (migrated !== merged) {
+      persist(migrated)
+    }
+    return migrated
   } catch {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
-    return fallback
+    const seeded = migrate(fallback)
+    persist(seeded)
+    return seeded
   }
 }
 

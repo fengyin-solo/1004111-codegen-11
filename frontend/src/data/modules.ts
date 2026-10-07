@@ -1,3 +1,10 @@
+import {
+  DEICING_ACTION_TARGETS,
+  DEICING_ACTIONS,
+  DEICING_FIELDS,
+  DEICING_KEY,
+  DEICING_STATUSES,
+} from '@/domain/deicing'
 import type { ModuleMeta } from './types'
 
 // 模块元数据由仓库生成时写入：字段、状态、动作、流转目标都在这里，页面不再各自写一遍。
@@ -102,15 +109,15 @@ export const MODULES: ModuleMeta[] = [
     metrics: ["待服务航班", "服务中航班", "设备异常数"],
   },
   {
-    key: "deicing",
+    key: DEICING_KEY,
     name: "除冰作业",
     entity: "除冰记录",
-    desc: "维护除冰记录，围绕除冰编号、关联航班、除冰液类型、预计用量做登记、筛选与状态流转。",
-    fields: ["除冰编号", "关联航班", "除冰液类型", "预计用量", "实际用量", "开始时间", "结束时间", "作业状态"],
-    statuses: ["待除冰", "作业中", "已完成", "已取消"],
-    actions: ["开始除冰", "确认完成", "取消作业"],
-    actionTargets: {"开始除冰": "作业中", "确认完成": "已完成", "取消作业": "已取消"},
-    metrics: ["待除冰航班", "作业中航班", "已完成除冰"],
+    desc: "维护除冰记录，围绕除冰编号、关联航班、除冰液类型、预计用量与实际用量做登记、用量校核、完成判定与取消归档。",
+    fields: [...DEICING_FIELDS],
+    statuses: [...DEICING_STATUSES],
+    actions: [...DEICING_ACTIONS],
+    actionTargets: { ...DEICING_ACTION_TARGETS },
+    metrics: ["待除冰航班", "作业中航班", "已完成除冰", "已取消归档"],
   },
   {
     key: "pushback",

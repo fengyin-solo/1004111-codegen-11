@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>航班保障管理</h2>
-        <p class="page-desc">维护航班保障，围绕航班号、机尾号、计划到港、实际到港做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护航班保障台账，围绕航班号、机尾号、计划到港、实际到港做登记与状态流转；除冰结论直接共用除冰作业的统一用量校核与完成判定。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记航班保障</button>
@@ -37,6 +37,8 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>除冰结论（共用）</th>
+          <th>除冰用量（预计 → 实际）</th>
           <th>当前状态</th>
           <th>可执行动作</th>
         </tr>
@@ -44,6 +46,8 @@
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>{{ deicingOf(row)?.label ?? '未安排除冰' }}</td>
+          <td>{{ deicingOf(row)?.usageText ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -58,7 +62,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无航班保障数据，可先登记航班保障</td>
+          <td :colspan="columns.length + 4" class="empty-state">暂无航班保障数据，可先登记航班保障</td>
         </tr>
       </tbody>
     </table>
@@ -74,11 +78,13 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  deicingLedgerForFlight,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import type { DeicingConclusion } from '@/domain/deicing'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('flight_ops')
@@ -92,6 +98,13 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 除冰结论按航班号取自除冰模块的统一规则，本台账不自己再判一遍。
+const deicingByFlight = ref<Map<string, DeicingConclusion>>(new Map())
+function deicingOf(row: EntryRow): DeicingConclusion | undefined {
+  return deicingByFlight.value.get(String(row['航班号'] ?? '').trim())
+}
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +141,14 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    // 每行都调一次按航班查询，这里构建一份全量映射供表格直接取，保持结论同源且避免重复计算。
+    deicingByFlight.value = new Map(
+      rows.value
+        .map((row) => String(row['航班号'] ?? '').trim())
+        .filter((flight, index, all) => flight && all.indexOf(flight) === index)
+        .map((flight) => [flight, deicingLedgerForFlight(flight)] as const)
+        .filter((entry): entry is readonly [string, DeicingConclusion] => entry[1] !== null),
+    )
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '航班保障列表读取失败'
   }

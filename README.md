@@ -68,4 +68,10 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
+- 除冰作业的字段、状态、动作、用量校核与完成判定收拢在 `frontend/src/domain/deicing.ts`：
+  动作、列表、CSV 导出以及航班保障台账（按航班号关联）都消费同一份结论，不再各写一遍。
+  - 完成口径：状态为「已完成」且已登记实际用量；用量校核台首次提交即锁定，重复提交不覆盖。
+  - 取消作业：预计/实际用量原样保留，记录打归档标记，归档后任何动作不再生效。
+  - 存量数据：读取时按 schema 版本兼容迁移——已取消记录只归档绝不写回完成，
+    已完成但缺实际用量的记录按预计用量兼容补录。
 - 想回到初始数据：清掉浏览器里 `airport-ground-handling:entries` 这一项，或调用 `resetModule(模块)`。
